@@ -8,6 +8,10 @@ name: windows-integration
 # and verifies its SHA-256 instead of rebuilding it, which keeps the wall clock at the cost of the
 # suites themselves. The suites boot a real guest and compile real programs under TCG, so they run
 # as a parallel matrix with binaries that were compiled once.
+#
+# Every run also builds the complete offline installer of `OILinux_PRD.md` §10.1 and uploads it as
+# the `oi-linux-installer` artefact, so any commit can be installed and tried out without cutting a
+# release; `release.yml` publishes the same bytes from the same staged resources when a tag lands.
 
 on:
   push:
@@ -118,3 +122,97 @@ jobs:
           path: D:\oi-linux-tests\**\*.log
           retention-days: 14
           if-no-files-found: ignore
+
+  installer:
+    # The offline installer of §10.1 with QEMU, the verified base image, the WebView2 offline
+    # installer and the licence inventory staged into the bundle. It waits for the unit tests and
+    # the verified image (`dist/` and the engine are what gets embedded) but runs beside the
+    # acceptance matrix: a bundle is also what a failing commit needs to be looked at.
+    needs: [unit, image]
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: alpine-base-image
+          path: vm/out
+
+      - name: Install QEMU for the bundle
+        shell: pwsh
+        run: |
+          choco install qemu -y --no-progress
+          & "C:\Program Files\qemu\qemu-system-x86_64.exe" --version
+
+      # The evergreen link is the one Microsoft documents for the standalone installer; its payload
+      # changes with every runtime release, so the signer is what gets verified, not a pinned hash.
+      - name: Download the WebView2 offline installer
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile $out
+          $signature = Get-AuthenticodeSignature $out
+          if ($signature.Status -ne 'Valid') { throw "the WebView2 installer is not signed: $($signature.Status)" }
+          if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "the WebView2 installer is signed by $($signature.SignerCertificate.Subject)"
+          }
+          Write-Host "WebView2 $((Get-Item $out).Length) bytes, $($signature.SignerCertificate.Subject)"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: installer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Stage the bundled resources
+        shell: pwsh
+        run: |
+          scripts\stage-resources.ps1 `
+            -QemuDir 'C:\Program Files\qemu' `
+            -BaseImage vm\out\base.qcow2 `
+            -WebView2 (Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
+
+      - name: Build the installer
+        shell: pwsh
+        env:
+          OI_LINUX_UPDATE_PUBKEY: ${{ vars.OI_LINUX_UPDATE_PUBKEY }}
+        run: |
+          npm ci
+          npm run tauri build
+
+      - name: Collect the artefacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item target\release\bundle\nsis\*.exe artifacts\ -ErrorAction SilentlyContinue
+          if (-not (Get-ChildItem artifacts\*.exe)) { throw 'the bundle produced no NSIS installer' }
+          Get-ChildItem artifacts\*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File "$($_.FullName).sha256" -Encoding ascii
+            Write-Host "$($_.Name) $([math]::Round($_.Length / 1MB)) MiB"
+          }
+          $info = [ordered]@{
+            product     = 'OI Linux'
+            version     = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            alpine      = (Select-String -Path src-tauri\crates\oi-core\src\lib.rs -Pattern 'ALPINE_VERSION: &str = "([^"]+)"').Matches.Groups[1].Value
+            base_sha256 = (Get-Content vm\out\base.qcow2.sha256 -Raw).Trim()
+            channel     = 'ci'
+            built_at    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            commit      = '${{ github.sha }}'
+          }
+          $info | ConvertTo-Json | Out-File artifacts\build-info.json -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oi-linux-installer
+          path: |
+            artifacts/*.exe
+            artifacts/*.sha256
+            artifacts/build-info.json
+          # the NSIS package carries already-compressed payloads
+          compression-level: 0
+          retention-days: 30

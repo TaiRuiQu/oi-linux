@@ -137,5 +137,5 @@ with a second copy of their sources (`OILinux_PRD.md` §7.4).
 | 3. SFTP rename and Windows file locks | **Verified**: `posix-rename@openssh.com` replaces the destination; a file held open with no sharing produces an explicit error and the original content survives. |
 | 4. TCG performance and 8 GiB hosts | **Measured** by `perf-baseline` on a 2 vCPU / 8 GiB cloud machine (see its report); the product never promises WHPX-speed builds on TCG. |
 | 5. WHPX fallback, Job Objects, QMP timeouts | **Verified**: the accelerator probe falls back to TCG with the actual error recorded (`WinHvPlatform.dll` missing here); the crash test leaves no QEMU writing to the overlay; every QMP call has a timeout. |
-| 6. Installer dependencies | The bundle is configured for the WebView2 **offline** installer, QEMU and the base image are staged by `scripts/stage-resources.ps1`, and the licence inventory ships as data. The NSIS package itself is produced by the release workflow. |
+| 6. Installer dependencies | The bundle is configured for the WebView2 **offline** installer, QEMU and the base image are staged by `scripts/stage-resources.ps1`, and the licence inventory ships as data. The NSIS package itself is produced by the `installer` job of `windows-integration.yml` (every run, uploaded as an artefact) and published as a release by `release.yml`. |
 

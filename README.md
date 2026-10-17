@@ -80,6 +80,11 @@ They create a real environment in `OI_TEST_DIR` (default `D:\oi-linux-tests`), b
 guest, and print a `PASS`/`FAIL` report; a non-zero exit code means at least one blocking
 criterion failed.
 
+Every push and pull request also builds the complete offline installer: the run's
+`oi-linux-installer` artefact is the ready-to-run `.exe` with QEMU, the verified Alpine base
+image, the WebView2 runtime and the licence inventory inside it. A tag makes `release.yml`
+publish the same bytes as a GitHub release.
+
 ## Where the data lives
 
 | Path | Content |

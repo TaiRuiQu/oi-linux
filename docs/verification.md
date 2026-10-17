@@ -160,6 +160,7 @@ The raw report is `integration-tests/artifacts/perf-baseline.json`.
   fallback are the behaviour the PRD requires on such a machine; WHPX remains the release-time
   manual gate.
 * **The NSIS installer** was not built here (it needs the Tauri bundler's NSIS download); the
-  release workflow builds it with the staged resources.
+  `installer` job of `windows-integration.yml` builds it on every run from the staged resources,
+  and `release.yml` publishes it.
 * The host limitation described at the top means the verification binaries ran from a copy. The
   production code path is identical; nothing in the suites depends on their own location.

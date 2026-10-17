@@ -68,6 +68,21 @@ jobs:
         with:
           node-version: 22
 
+      # The evergreen link is the one Microsoft documents for the standalone installer; its payload
+      # changes with every runtime release, so the signer is what gets verified, not a pinned hash.
+      - name: Download the WebView2 offline installer
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile $out
+          $signature = Get-AuthenticodeSignature $out
+          if ($signature.Status -ne 'Valid') { throw "the WebView2 installer is not signed: $($signature.Status)" }
+          if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "the WebView2 installer is signed by $($signature.SignerCertificate.Subject)"
+          }
+          Write-Host "WebView2 $((Get-Item $out).Length) bytes, $($signature.SignerCertificate.Subject)"
+
       - name: Stage the bundled resources
         shell: pwsh
         run: |

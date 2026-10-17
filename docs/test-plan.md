@@ -110,5 +110,6 @@ the failure counter, log redaction and the storage layout.
   the WHPX path is exercised by its probe (which fails cleanly and falls back).
 * **A physical restore of the system drive.** Re-association is tested by discarding the settings
   file, which is what a reinstall loses.
-* **The installed NSIS package.** The release workflow builds it; the acceptance suites test the
-  application and the engine, not the installer wrapper.
+* **The installed NSIS package.** `windows-integration.yml` builds it on every run and
+  `release.yml` publishes it; the acceptance suites test the application and the engine, not the
+  installer wrapper.
