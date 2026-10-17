@@ -1,0 +1,56 @@
+[package]
+name = "oi-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "OI Linux host core: VM lifecycle, host SFTP share, storage, SSH, seed disk and updater logic."
+repository.workspace = true
+
+[lib]
+name = "oi_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oitool"
+path = "src/bin/oitool.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+tokio.workspace = true
+futures.workspace = true
+bytes.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
+rusqlite.workspace = true
+russh.workspace = true
+russh-sftp.workspace = true
+ssh-key.workspace = true
+tempfile.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
+reqwest.workspace = true
+semver.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true

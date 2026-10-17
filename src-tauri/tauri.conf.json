@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OI Linux",
+  "version": "0.1.0",
+  "identifier": "org.oilinux.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OI Linux",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 980,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "publisher": "OI Linux Contributors",
+    "copyright": "GPL-3.0-or-later",
+    "shortDescription": "A real Alpine Linux training environment for informatics olympiad students",
+    "longDescription": "OI Linux runs a real x86-64 Alpine Linux virtual machine with GCC/G++/GDB on Windows, sharing a single NTFS workspace directory so that source files and build outputs are one and the same for Windows VS Code and the Linux terminal.",
+    "licenseFile": "../LICENSE",
+    "resources": ["resources/**/*"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {}
+}

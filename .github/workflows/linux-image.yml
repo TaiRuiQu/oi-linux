@@ -1,0 +1,60 @@
+name: linux-image
+
+# Builds the Alpine base image that ships with OI Linux (`OILinux_PRD.md` §10.3).
+#
+# The image pins the Alpine branch, the package list and the rootfs overlay, and it is the only
+# source of the `base.qcow2` the product packages: application updates never replace it, and a
+# new image is used for new environments or resets only.
+#
+# `vm/build.sh` boots the official Alpine live medium under QEMU TCG and drives it over a serial
+# console, exactly like the Windows build (`vm/build-base-image.ps1`). It needs root for the loop
+# mount of the ISO, which the runner's passwordless sudo provides.
+
+on:
+  push:
+    paths:
+      - 'vm/**'
+      - '.github/workflows/linux-image.yml'
+  pull_request:
+    paths:
+      - 'vm/**'
+  workflow_dispatch:
+
+env:
+  ISO_URL: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-standard-3.24.2-x86_64.iso
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU and helpers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils python3 curl
+
+      - name: Build the base image
+        run: |
+          mkdir -p vm/out
+          sudo -E bash vm/build.sh vm/out
+
+      - name: Boot test (the image must reach a login prompt)
+        run: |
+          sudo bash vm/tests/boot-smoke.sh vm/out/base.qcow2 420
+
+      - name: Show the image identity
+        run: |
+          cat vm/out/base.qcow2.sha256
+          ls -l vm/out/base.qcow2
+
+      - name: Upload the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-base-image
+          path: |
+            vm/out/base.qcow2
+            vm/out/base.qcow2.sha256
+            vm/out/boot-smoke.log
+          retention-days: 30

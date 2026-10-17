@@ -1,0 +1,9 @@
+# Deterministic guest networking. QEMU user-mode networking hands out 10.0.2.15/24 with the
+# gateway at 10.0.2.2; the host share service is reached through that alias or through the
+# reverse tunnel, never through the local network.
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+    hostname oi-linux

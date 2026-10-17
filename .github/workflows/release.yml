@@ -1,0 +1,123 @@
+name: release
+
+# Produces the offline Windows installer (`OILinux_PRD.md` §10.1/§10.3):
+#
+#   * the complete `.exe` (NSIS) with QEMU, the verified Alpine base image, the SSH/SFTP
+#     components and the WebView2 offline installer,
+#   * SHA-256 for the package,
+#   * the third-party licence inventory,
+#   * a build information file recording the pinned Alpine branch, package list and image hash.
+#
+# Stable and Beta are built from the same commit; the channel is what the published manifest
+# points at. The same bytes are uploaded to GitHub Releases and mirrored domestically.
+#
+# The updater manifest (`latest.json`) is produced together with the signed updater artifact once
+# the signing key is configured in the repository secrets; until then the release ships the
+# installer and its SHA-256 only.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'beta-*'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'stable or beta'
+        required: true
+        default: stable
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the latest verified base image
+        id: image
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $runId = gh run list --workflow linux-image.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+          if (-not $runId) { throw 'no successful linux-image run is available' }
+          Write-Host "using linux-image run $runId"
+          "run_id=$runId" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Download the verified base image
+        uses: actions/download-artifact@v4
+        with:
+          name: alpine-base-image
+          path: vm/out
+          run-id: ${{ steps.image.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the base image hash
+        shell: pwsh
+        run: |
+          $expected = (Get-Content vm\out\base.qcow2.sha256 -Raw).Trim()
+          $actual = (Get-FileHash vm\out\base.qcow2 -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "base image hash mismatch: $actual != $expected" }
+
+      - name: Install QEMU for the bundle
+        shell: pwsh
+        run: |
+          choco install qemu -y --no-progress
+          & "C:\Program Files\qemu\qemu-system-x86_64.exe" --version
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Stage the bundled resources
+        shell: pwsh
+        run: |
+          scripts\stage-resources.ps1 `
+            -QemuDir 'C:\Program Files\qemu' `
+            -BaseImage vm\out\base.qcow2 `
+            -WebView2 (Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
+
+      - name: Build the installer
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          OI_LINUX_UPDATE_PUBKEY: ${{ vars.OI_LINUX_UPDATE_PUBKEY }}
+        run: |
+          npm ci
+          npm run tauri build
+
+      - name: Collect the artefacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item target\release\bundle\nsis\*.exe artifacts\ -ErrorAction SilentlyContinue
+          Get-ChildItem artifacts\*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File "$($_.FullName).sha256" -Encoding ascii
+          }
+          $info = [ordered]@{
+            product      = 'OI Linux'
+            version      = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            alpine       = (Select-String -Path src-tauri\crates\oi-core\src\lib.rs -Pattern 'ALPINE_VERSION: &str = "([^"]+)"').Matches.Groups[1].Value
+            base_sha256  = (Get-Content vm\out\base.qcow2.sha256 -Raw).Trim()
+            channel      = '${{ github.event.inputs.channel }}'
+            built_at     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            commit       = '${{ github.sha }}'
+          }
+          $info | ConvertTo-Json | Out-File artifacts\build-info.json -Encoding utf8
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.exe
+            artifacts/*.sha256
+            artifacts/build-info.json
+          generate_release_notes: true
+          prerelease: ${{ startsWith(github.ref_name, 'beta-') }}

@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "generated_by": "scripts/stage-resources.ps1",
+  "note": "This list is refreshed by the release job from the pinned dependency set. The GPL-3.0-or-later licence of OI Linux itself applies only to the project's own code.",
+  "components": [
+    {
+      "name": "QEMU",
+      "version": "11.1.0",
+      "license": "GPL-2.0-or-later",
+      "url": "https://www.qemu.org/",
+      "source_offer": "Corresponding source is published with each release alongside the binary package."
+    },
+    {
+      "name": "Alpine Linux",
+      "version": "3.24.2",
+      "license": "MIT (distribution) with per-package licences",
+      "url": "https://alpinelinux.org/",
+      "source_offer": "Package sources are available from the Alpine repositories."
+    },
+    {
+      "name": "OpenSSH",
+      "version": "9.x (Alpine package)",
+      "license": "BSD-2-Clause style",
+      "url": "https://www.openssh.com/",
+      "source_offer": "Included in the Alpine package sources."
+    },
+    {
+      "name": "SSHFS / FUSE",
+      "version": "3.x",
+      "license": "GPL-2.0-or-later",
+      "url": "https://github.com/libfuse/sshfs",
+      "source_offer": "Included in the Alpine package sources."
+    },
+    {
+      "name": "GCC / G++ / GDB",
+      "version": "Alpine 3.24 toolchain",
+      "license": "GPL-3.0-or-later (GCC), GPL-3.0-or-later (GDB)",
+      "url": "https://gcc.gnu.org/",
+      "source_offer": "Alpine publishes the patches applied to the upstream releases."
+    },
+    {
+      "name": "WebView2 Runtime",
+      "version": "Evergreen offline installer",
+      "license": "Microsoft Software Licence Terms",
+      "url": "https://developer.microsoft.com/microsoft-edge/webview2/",
+      "source_offer": "Distributed unmodified in the offline installer."
+    }
+  ]
+}

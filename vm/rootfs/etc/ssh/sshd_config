@@ -1,0 +1,43 @@
+# OI Linux guest sshd configuration.
+#
+# The only account that exists for remote use is `student` (public key, no password); root login
+# is refused. Host keys are injected per machine through the boot-time seed disk, so they are
+# never generated here.
+#
+# Only options understood by Alpine's OpenSSH build are listed: it is compiled without PAM, so
+# `UsePAM` and `PrintLastLog` would only produce a warning at every start.
+
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# No password or keyboard-interactive authentication is ever accepted.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers student
+
+# One terminal tab is one SSH session; the multi-tab terminal needs headroom for several of
+# them at once.
+MaxSessions 32
+MaxStartups 32:30:64
+ClientAliveInterval 30
+ClientAliveCountMax 6
+
+PrintMotd no
+X11Forwarding no
+AllowAgentForwarding no
+# The host opens the share tunnel with a `tcpip-forward` request, which the guest's sshd treats
+# as a *remote* forward. Only that direction is allowed, and `GatewayPorts no` keeps the listener
+# on the guest's loopback interface.
+AllowTcpForwarding remote
+GatewayPorts no
+PermitTunnel no
+Subsystem sftp internal-sftp

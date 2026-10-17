@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# Applies the OI Linux boot-time seed configuration disk before sshd starts, so that the guest
+# always presents the per-machine host key and accepts the host's current client key.
+
+description="Apply the OI Linux boot-time seed configuration disk"
+name="oi-seed"
+
+depend() {
+    need localmount
+    after devfs hwdrivers
+    before sshd
+    provide oi-seed
+}
+
+start() {
+    ebegin "Applying the OI Linux seed configuration"
+    /usr/libexec/oi/apply-seed.sh
+    eend $?
+}
+
+stop() {
+    return 0
+}

@@ -1,0 +1,15 @@
+# Boot loader configuration of the shipped Alpine base image.
+#
+# `rootfstype` is required: the root file system lives on ext4, which is a module in this kernel,
+# so the initramfs has to be told the type before it can mount it (`modules=ext4` makes sure the
+# module is present in the initramfs as well).
+#
+# The console is duplicated on the serial port so that the application can keep a boot log
+# (`logs\console.log`) for diagnostics; the last console= entry becomes /dev/console, which is
+# where OpenRC writes its service messages.
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=1
+GRUB_DISTRIBUTOR="OI Linux"
+GRUB_CMDLINE_LINUX_DEFAULT="rootfstype=ext4 modules=ext4 quiet console=tty0 console=ttyS0,115200"
+GRUB_DISABLE_OS_PROBER=true
+GRUB_DISABLE_RECOVERY=true

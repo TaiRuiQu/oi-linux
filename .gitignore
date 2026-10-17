@@ -1,0 +1,27 @@
+/target
+**/target
+/node_modules
+**/node_modules
+/dist
+**/dist
+*.log
+.DS_Store
+Thumbs.db
+
+# build artifacts produced locally (not part of the repository)
+/artifacts/
+/vm/out/
+/vm/build/
+/integration-tests/artifacts/
+*.iso
+*.qcow2
+!vm/images/.gitkeep
+
+# rust
+**/*.rs.bk
+
+# tauri
+src-tauri/gen/schemas
+
+# local agent/tooling state
+.commandcode/

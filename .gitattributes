@@ -1,0 +1,9 @@
+# Line endings: the shell scripts in vm/ are executed inside the guest, so they must keep LF even
+# when the repository is checked out on Windows.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.exe binary
+*.qcow2 binary
+*.iso binary

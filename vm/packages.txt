@@ -1,0 +1,23 @@
+# Packages installed into the Alpine base image (`OILinux_PRD.md` §5.2).
+#
+# The list is pinned by `vm/build.sh`/`scripts/build-base-image.ps1`: the shipped base image is
+# what was verified by the release tests, and application updates never replace it.
+#
+# Core set required by the PRD:
+build-base
+gcc
+g++
+gdb
+git
+bash
+coreutils
+time
+openssh
+sshfs
+fuse3
+sudo
+# Interactive tools the terminal experience expects (vim/gdb interactions are part of the
+# acceptance criteria, and a beginner-friendly editor is kept alongside it):
+vim
+nano
+less

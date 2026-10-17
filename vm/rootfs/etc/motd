@@ -1,0 +1,14 @@
+Welcome to OI Linux (Alpine Linux) — 欢迎使用 OI Linux
+
+  Windows workspace :  /home/student/workspace
+  你的源代码建议保存在 Windows 工作目录中，这里只是它的挂载点。
+  Keep the only copy of your source code in the Windows workspace, not on the Linux disk.
+
+  编译 / build:   g++ main.cpp -o main && ./main
+  调试 / debug:   gdb ./main
+  权限 / chmod:   chmod +x main
+
+  Linux 环境可以随时重置，重置会清空 Linux 磁盘内的文件（共享目录不受影响）。
+  The Linux environment can be reset at any time; files inside the Linux disk are lost.
+  请使用 Git 或自行备份重要源代码。Please use Git or keep your own backups.
+

@@ -1,0 +1,16 @@
+# OI Linux guest inittab.
+#
+# Two things are added to Alpine's default: a getty on the serial port, so that the boot log the
+# application keeps (`logs\console.log`) shows a usable console and support can log in without a
+# network, and the six virtual consoles are dropped because the virtual machine has no display.
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
+
+# tty1 is used for the boot output of the kernel and OpenRC
+tty1::respawn:/sbin/getty 38400 tty1
+ttyS0::respawn:/sbin/getty -L 0 ttyS0 vt100
+
+::ctrlaltdel:/sbin/reboot
+::shutdown:/sbin/openrc shutdown
+::restart:/sbin/init

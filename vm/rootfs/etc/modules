@@ -1,0 +1,3 @@
+# Kernel modules loaded at boot. FUSE is what makes the shared Windows workspace mountable
+# inside the guest as an ordinary directory.
+fuse
