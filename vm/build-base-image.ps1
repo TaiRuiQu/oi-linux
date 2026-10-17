@@ -97,6 +97,7 @@ Remove-Item $payload -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { Fail 'the payload could not be packed.' }
 
 Write-Step "booting the live medium (TCG; this is the slow part)"
+$serialLog = Join-Path $WorkDir 'serial.log'
 $qemuArgs = @(
     '-name', 'oi-image-build',
     '-accel', 'tcg,thread=multi',
@@ -139,12 +140,13 @@ function Quote-Argument([string]$value) {
 # spaces (the firmware, the ISO and the work directory all can contain one), so the process is
 # launched through .NET, which quotes each argument itself. Windows PowerShell runs on .NET
 # Framework, which predates `ArgumentList`, hence the manual quoting fallback.
+#
+# QEMU's own stdout/stderr are deliberately *not* redirected: an unread pipe would eventually
+# block the emulator, and QEMU's diagnostics belong in the build log anyway.
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = $Qemu
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
-$startInfo.RedirectStandardOutput = $true
-$startInfo.RedirectStandardError = $true
 if ($startInfo.PSObject.Properties.Name -contains 'ArgumentList') {
     foreach ($argument in $qemuArgs) { $startInfo.ArgumentList.Add([string]$argument) }
 } else {
@@ -153,27 +155,13 @@ if ($startInfo.PSObject.Properties.Name -contains 'ArgumentList') {
 $qemuProcess = [System.Diagnostics.Process]::Start($startInfo)
 if (-not $qemuProcess) { Fail 'QEMU did not start.' }
 
-$driver = Join-Path $repo 'vm\scripts\serial-console.py'
+$driver = Join-Path $repo 'vm\scripts\build-image.py'
 try {
-    Write-Step "waiting for the live medium and logging in"
-    & python $driver --port $SerialPort --first-login --wait-for '#' --command 'echo live-ready' --output-seconds 10 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Fail 'the live medium did not come up.' }
-
-    Write-Step "uploading the installer"
-    & python $driver --port $SerialPort --upload $payload --upload-to '/root/oi-payload.tar.gz'
-    if ($LASTEXITCODE -ne 0) { Fail 'the payload could not be uploaded.' }
-
-    Write-Step "installing (this takes a while under TCG)"
-    $installCommand = "rm -rf /root/oi-rootfs /root/scripts && tar -xzf /root/oi-payload.tar.gz -C /root && mv /root/rootfs /root/oi-rootfs && cp /root/scripts/install-base.sh /root/ && sh /root/install-base.sh $Mirror $Branch > /root/install.log 2>&1; echo INSTALL-EXIT=`$?"
-    & python $driver --port $SerialPort --command $installCommand --output-seconds 3600 | Tee-Object -FilePath (Join-Path $OutDir 'install.log') | Out-Null
-
-    $installLog = Get-Content (Join-Path $OutDir 'install.log') -Raw
-    if ($installLog -notmatch 'OI-INSTALL-OK') {
-        Fail 'the installation did not finish; see the install log in the output directory.'
+    Write-Step "installing (one serial session: login, upload, install, power off)"
+    & python $driver --port $SerialPort --payload $payload --mirror $Mirror --branch $Branch --transcript $serialLog | Tee-Object -FilePath (Join-Path $OutDir 'install.log') | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'the installation did not finish; see the install log and the serial transcript.'
     }
-
-    Write-Step "shutting the live medium down"
-    & python $driver --port $SerialPort --command 'poweroff -f' --output-seconds 20 | Out-Null
 } finally {
     if ($qemuProcess) {
         try {

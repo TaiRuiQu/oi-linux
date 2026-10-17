@@ -1,34 +1,44 @@
 name: linux-image
 
-# Builds the Alpine base image that ships with OI Linux (`OILinux_PRD.md` §10.3).
+# Rebuilds the Alpine base image and publishes it as a release asset (`OILinux_PRD.md` §10.3).
 #
-# The image pins the Alpine branch, the package list and the rootfs overlay, and it is the only
-# source of the `base.qcow2` the product packages: application updates never replace it, and a
-# new image is used for new environments or resets only.
+# The shipped image is a *release artefact*, not something every CI run produces: it is built
+# once per recipe change, verified, and pinned by SHA-256 in `vm/base-image.json`. The other
+# workflows download that asset, so the slow TCG build does not sit in the path of every push.
 #
-# `vm/build.sh` boots the official Alpine live medium under QEMU TCG and drives it over a serial
-# console, exactly like the Windows build (`vm/build-base-image.ps1`). It needs root for the loop
-# mount of the ISO, which the runner's passwordless sudo provides.
+# Run this workflow manually when `vm/packages.txt`, `vm/rootfs/**` or the installer change. The
+# result is cached by recipe content and uploaded to the release named by `publish_tag`.
 
 on:
-  push:
-    paths:
-      - 'vm/**'
-      - '.github/workflows/linux-image.yml'
-  pull_request:
-    paths:
-      - 'vm/**'
   workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: 'Release tag to publish the image under (empty = build only)'
+        required: false
+        default: ''
 
 env:
+  ALPINE_RELEASE: '3.24.2'
   ISO_URL: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-standard-3.24.2-x86_64.iso
+  ISO_SHA256: 20c026e3a788bfb75fc8b50a54bcc12aee85e3c75909740bba6a6f4563d63296
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 180
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache the image by recipe content
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            vm/out/base.qcow2
+            vm/out/base.qcow2.sha256
+          key: oi-base-${{ env.ALPINE_RELEASE }}-${{ hashFiles('vm/packages.txt', 'vm/rootfs/**', 'vm/scripts/install-base.sh', 'vm/scripts/build-image.py') }}
 
       - name: Install QEMU and helpers
         run: |
@@ -36,21 +46,29 @@ jobs:
           sudo apt-get install -y qemu-system-x86 qemu-utils python3 curl
 
       - name: Build the base image
+        if: steps.image-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p vm/out
-          sudo -E bash vm/build.sh vm/out
+          sudo -E \
+            OI_ISO_SHA256="$ISO_SHA256" \
+            OI_BUILD_CPUS=4 \
+            OI_BUILD_MEMORY=3072 \
+            OI_SERIAL_PORT=44600 \
+            bash vm/build.sh vm/out
+
+      - name: Recompute the hash after a cache hit
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: sha256sum vm/out/base.qcow2 | cut -d' ' -f1 > vm/out/base.qcow2.sha256
 
       - name: Boot test (the image must reach a login prompt)
-        run: |
-          sudo bash vm/tests/boot-smoke.sh vm/out/base.qcow2 420
+        run: sudo bash vm/tests/boot-smoke.sh vm/out/base.qcow2 420
 
       - name: Show the image identity
         run: |
           cat vm/out/base.qcow2.sha256
           ls -l vm/out/base.qcow2
 
-      - name: Upload the image
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: alpine-base-image
           path: |
@@ -58,3 +76,20 @@ jobs:
             vm/out/base.qcow2.sha256
             vm/out/boot-smoke.log
           retention-days: 30
+
+      - name: Publish the image as a release asset
+        if: ${{ inputs.publish_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ inputs.publish_tag }}"
+          cp vm/out/base.qcow2 base.qcow2
+          cp vm/out/base.qcow2.sha256 base.qcow2.sha256
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" base.qcow2 base.qcow2.sha256 --clobber
+          else
+            gh release create "$tag" base.qcow2 base.qcow2.sha256 \
+              --title "Alpine base image $ALPINE_RELEASE ($tag)" \
+              --notes "Verified OI Linux base image, sha256 $(cat base.qcow2.sha256)"
+          fi

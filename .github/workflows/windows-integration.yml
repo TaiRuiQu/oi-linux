@@ -1,13 +1,13 @@
 name: windows-integration
 
-# The blocking acceptance suites of `OILinux_PRD.md` §11.2, §11.3 and §11.4 on a Windows runner
-# without hardware virtualisation: TCG boot, file sharing, permissions, execution and lifecycle.
+# The blocking acceptance suites of `OILinux_PRD.md` §11.2, §11.3 and §11.4 on Windows, without
+# hardware virtualisation (TCG). WHPX is not assumed on shared runners; it stays a release-time
+# check on dedicated hardware.
 #
-# WHPX is *not* assumed on shared runners (the PRD says so explicitly); the TCG path is the
-# mandatory gate, and WHPX remains a release-time check on dedicated hardware.
-#
-# The base image is built once in the first job and handed to the acceptance job as an artifact;
-# building it from source is what makes the workflow self-contained (no image is committed).
+# The base image is a release artefact (`vm/base-image.json`): CI downloads the published image
+# and verifies its SHA-256 instead of rebuilding it, which keeps the wall clock at the cost of the
+# suites themselves. The suites boot a real guest and compile real programs under TCG, so they run
+# as a parallel matrix with binaries that were compiled once.
 
 on:
   push:
@@ -16,55 +16,75 @@ on:
   workflow_dispatch:
 
 env:
-  ISO_URL: https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-standard-3.24.2-x86_64.iso
+  OI_LINUX_QEMU: C:\Program Files\qemu\qemu-system-x86_64.exe
+  OI_TEST_DIR: D:\oi-linux-tests
+  RUST_LOG: warn
 
 jobs:
-  base-image:
+  binaries:
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install QEMU
-        shell: pwsh
-        run: |
-          choco install qemu -y --no-progress
-          & "C:\Program Files\qemu\qemu-system-x86_64.exe" --version
-
-      - name: Download the Alpine standard ISO
-        shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $iso = Join-Path $env:RUNNER_TEMP 'alpine-standard.iso'
-          Invoke-WebRequest -Uri $env:ISO_URL -OutFile $iso
-          Get-Item $iso | Select-Object Length
-
       - uses: dtolnay/rust-toolchain@stable
+      - name: Build the acceptance binaries
+        run: cargo build -p oi-integration-tests --bins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oi-acceptance-binaries
+          path: target/debug/*.exe
+          retention-days: 7
 
-      - name: Build the base image
+  unit:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Front-end build (the Tauri crate embeds dist/)
+        run: |
+          npm ci
+          npm run build
+      - name: Unit tests
+        run: cargo test --workspace
+
+  image:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the pinned base image
         shell: pwsh
         run: |
-          $iso = Join-Path $env:RUNNER_TEMP 'alpine-standard.iso'
-          ./vm/build-base-image.ps1 `
-            -Iso $iso `
-            -WorkDir (Join-Path $env:RUNNER_TEMP 'oi-image-build') `
-            -OutDir vm\out `
-            -SerialPort 44610
-
-      - name: Upload the image
-        uses: actions/upload-artifact@v4
+          $pin = Get-Content vm\base-image.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force -Path vm\out | Out-Null
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri $pin.url -OutFile vm\out\base.qcow2
+          $actual = (Get-FileHash vm\out\base.qcow2 -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $pin.sha256) {
+            throw "base image hash mismatch: $actual != $($pin.sha256)"
+          }
+          Set-Content -Path vm\out\base.qcow2.sha256 -Value $actual -NoNewline
+          Write-Host "base image $actual"
+      - uses: actions/upload-artifact@v4
         with:
           name: alpine-base-image
           path: |
             vm/out/base.qcow2
             vm/out/base.qcow2.sha256
-            vm/out/install.log
-          retention-days: 14
+          retention-days: 7
 
   acceptance:
-    needs: base-image
+    needs: [binaries, image]
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [ntfs-share, chmod-exec, boot-reset, upgrade-relink]
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 
@@ -72,60 +92,29 @@ jobs:
         shell: pwsh
         run: |
           choco install qemu -y --no-progress
-          & "C:\Program Files\qemu\qemu-system-x86_64.exe" --version
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          & $env:OI_LINUX_QEMU --version
 
       - uses: actions/download-artifact@v4
         with:
           name: alpine-base-image
           path: vm/out
 
-      - name: Verify the base image
+      - uses: actions/download-artifact@v4
+        with:
+          name: oi-acceptance-binaries
+          path: target/debug
+
+      - name: Run ${{ matrix.suite }}
         shell: pwsh
         run: |
-          $expected = (Get-Content vm\out\base.qcow2.sha256 -Raw).Trim()
-          $actual = (Get-FileHash vm\out\base.qcow2 -Algorithm SHA256).Hash.ToLower()
-          if ($expected -ne $actual) { throw "base image hash mismatch: $actual != $expected" }
-          Write-Host "base image $actual"
-
-      - name: Front-end build
-        run: |
-          npm ci
-          npm run build
-
-      # The Tauri crate embeds `dist/` at compile time, so the front end has to be built before
-      # the workspace (which includes the shell) is compiled or tested.
-      - name: Build the toolchain and the acceptance tests
-        run: cargo build --workspace --all-targets
-
-      - name: Unit tests
-        run: cargo test --workspace
-
-      - name: Blocking acceptance suites
-        shell: pwsh
-        env:
-          OI_TEST_DIR: D:\oi-linux-tests
-          RUST_LOG: warn
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $failed = @()
-          foreach ($suite in @('ntfs-share', 'chmod-exec', 'boot-reset', 'upgrade-relink')) {
-            Write-Host "`n=== $suite ==="
-            & ".\target\debug\$suite.exe"
-            if ($LASTEXITCODE -ne 0) { $failed += $suite }
-          }
-          if ($failed.Count -gt 0) { throw "failed suites: $($failed -join ', ')" }
+          & ".\target\debug\${{ matrix.suite }}.exe"
+          if ($LASTEXITCODE -ne 0) { throw "${{ matrix.suite }} failed with exit code $LASTEXITCODE" }
 
       - name: Upload the logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: acceptance-logs
-          path: |
-            D:\oi-linux-tests\**\*.log
+          name: logs-${{ matrix.suite }}
+          path: D:\oi-linux-tests\**\*.log
           retention-days: 14
           if-no-files-found: ignore

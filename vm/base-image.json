@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "alpine_version": "3.24.2",
+  "tag": "base-image-3.24.2-r1",
+  "url": "https://github.com/TaiRuiQu/oi-linux/releases/download/base-image-3.24.2-r1/base.qcow2",
+  "sha256": "5148c5a528ee03a664fbf63d95f595fcee1d8cd060870a5888afc586461902fe",
+  "size_bytes": 595656704,
+  "built_from": "vm/scripts/install-base.sh",
+  "note": "The base image is a release artefact, not something CI rebuilds: it is built once from vm/ and pinned here by SHA-256. Application updates never replace it; a new image is used for new environments and resets only (OILinux_PRD.md 10.2)."
+}

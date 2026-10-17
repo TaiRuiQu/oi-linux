@@ -37,24 +37,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Locate the latest verified base image
-        id: image
+      - name: Download the pinned base image
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $runId = gh run list --workflow linux-image.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
-          if (-not $runId) { throw 'no successful linux-image run is available' }
-          Write-Host "using linux-image run $runId"
-          "run_id=$runId" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Download the verified base image
-        uses: actions/download-artifact@v4
-        with:
-          name: alpine-base-image
-          path: vm/out
-          run-id: ${{ steps.image.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          $pin = Get-Content vm\base-image.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force -Path vm\out | Out-Null
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri $pin.url -OutFile vm\out\base.qcow2
+          $actual = (Get-FileHash vm\out\base.qcow2 -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $pin.sha256) {
+            throw "base image hash mismatch: $actual != $($pin.sha256)"
+          }
+          Set-Content -Path vm\out\base.qcow2.sha256 -Value $actual -NoNewline
 
       - name: Verify the base image hash
         shell: pwsh

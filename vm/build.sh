@@ -19,6 +19,9 @@ RELEASE="${OI_ALPINE_RELEASE:-3.24.2}"
 MIRROR="${OI_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}"
 SERIAL_PORT="${OI_SERIAL_PORT:-44600}"
 WORK="${OI_BUILD_DIR:-$REPO/vm/build}"
+CPUS="${OI_BUILD_CPUS:-2}"
+MEMORY="${OI_BUILD_MEMORY:-2048}"
+ISO_SHA256="${OI_ISO_SHA256:-}"
 
 mkdir -p "$OUT" "$WORK/images" "$WORK/logs"
 
@@ -30,6 +33,13 @@ if [ ! -f "$ISO" ]; then
 fi
 echo "== ISO =="
 sha256sum "$ISO"
+if [ -n "$ISO_SHA256" ]; then
+    actual="$(sha256sum "$ISO" | cut -d' ' -f1)"
+    if [ "$actual" != "$ISO_SHA256" ]; then
+        echo "ISO checksum $actual does not match the pinned $ISO_SHA256" >&2
+        exit 1
+    fi
+fi
 
 echo "== extracting the kernel and initramfs =="
 mkdir -p "$WORK/iso"
@@ -46,7 +56,7 @@ qemu-img create -f qcow2 "$DISK" 8G
 
 echo "== booting the live medium =="
 qemu-system-x86_64 \
-    -name oi-image-build -accel tcg,thread=multi -m 2048 -smp 2 \
+    -name oi-image-build -accel tcg,thread=multi -m "$MEMORY" -smp "$CPUS" \
     -kernel "$WORK/images/vmlinuz-lts" -initrd "$WORK/images/initramfs-lts" \
     -append 'modules=loop,squashfs,sd-mod,usb-storage alpine_dev=cdrom console=tty0 console=ttyS0,115200' \
     -cdrom "$ISO" \
@@ -58,27 +68,21 @@ QEMU_PID=$!
 trap 'kill $QEMU_PID 2>/dev/null || true' EXIT
 
 sleep 5
-DRIVER="$REPO/vm/scripts/serial-console.py"
-python3 "$DRIVER" --port "$SERIAL_PORT" --first-login --wait-for '#' \
-    --command 'echo live-ready' --output-seconds 10 >/dev/null
-
-echo "== uploading the installer =="
+echo "== uploading and installing (one serial session) =="
 tar -czf "$WORK/oi-payload.tar.gz" -C "$REPO/vm" rootfs scripts/install-base.sh
-python3 "$DRIVER" --port "$SERIAL_PORT" --upload "$WORK/oi-payload.tar.gz" \
-    --upload-to /root/oi-payload.tar.gz
-python3 "$DRIVER" --port "$SERIAL_PORT" --command \
-    "rm -rf /root/oi-rootfs /root/scripts && tar -xzf /root/oi-payload.tar.gz -C /root && \
-     mv /root/rootfs /root/oi-rootfs && cp /root/scripts/install-base.sh /root/ && \
-     sh /root/install-base.sh $MIRROR $BRANCH > /root/install.log 2>&1; echo INSTALL-EXIT=\$?" \
-    --output-seconds 3600 | tee "$OUT/install.log"
+python3 "$REPO/vm/scripts/build-image.py" \
+    --port "$SERIAL_PORT" \
+    --payload "$WORK/oi-payload.tar.gz" \
+    --mirror "$MIRROR" \
+    --branch "$BRANCH" \
+    --transcript "$WORK/logs/serial.log" | tee "$OUT/install.log"
 
 if ! grep -q 'OI-INSTALL-OK' "$OUT/install.log"; then
     echo "the installation did not finish; see $OUT/install.log" >&2
     exit 1
 fi
 
-echo "== shutting the live medium down =="
-python3 "$DRIVER" --port "$SERIAL_PORT" --command 'poweroff -f' --output-seconds 20 >/dev/null || true
+echo "== waiting for the live medium to power off =="
 wait $QEMU_PID 2>/dev/null || true
 
 echo "== publishing =="
