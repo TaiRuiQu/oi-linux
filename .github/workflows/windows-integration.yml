@@ -92,16 +92,18 @@ jobs:
           if ($expected -ne $actual) { throw "base image hash mismatch: $actual != $expected" }
           Write-Host "base image $actual"
 
+      - name: Front-end build
+        run: |
+          npm ci
+          npm run build
+
+      # The Tauri crate embeds `dist/` at compile time, so the front end has to be built before
+      # the workspace (which includes the shell) is compiled or tested.
       - name: Build the toolchain and the acceptance tests
         run: cargo build --workspace --all-targets
 
       - name: Unit tests
         run: cargo test --workspace
-
-      - name: Front-end build
-        run: |
-          npm ci
-          npm run build
 
       - name: Blocking acceptance suites
         shell: pwsh

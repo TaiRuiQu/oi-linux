@@ -112,15 +112,44 @@ $qemuArgs = @(
     '-display', 'none', '-monitor', 'none', '-rtc', 'base=utc'
 )
 
+# Quote one argument the way Windows expects, for the .NET Framework fallback below.
+function Quote-Argument([string]$value) {
+    if ($value -eq '') { return '""' }
+    if ($value -notmatch '[\s"]') { return $value }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($ch in $value.ToCharArray()) {
+        if ($ch -eq '\') { $backslashes++; continue }
+        if ($ch -eq '"') {
+            [void]$builder.Append('\' * (2 * $backslashes + 1))
+            [void]$builder.Append('"')
+        } else {
+            [void]$builder.Append('\' * $backslashes)
+            [void]$builder.Append($ch)
+        }
+        $backslashes = 0
+    }
+    [void]$builder.Append('\' * (2 * $backslashes))
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
 # `Start-Process -ArgumentList` joins arguments with spaces and cannot represent a path with
 # spaces (the firmware, the ISO and the work directory all can contain one), so the process is
-# launched through .NET, which quotes each argument itself.
-$startInfo = [System.Diagnostics.ProcessStartInfo]::new($Qemu)
-foreach ($argument in $qemuArgs) { $startInfo.ArgumentList.Add($argument) }
+# launched through .NET, which quotes each argument itself. Windows PowerShell runs on .NET
+# Framework, which predates `ArgumentList`, hence the manual quoting fallback.
+$startInfo = New-Object System.Diagnostics.ProcessStartInfo
+$startInfo.FileName = $Qemu
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
+if ($startInfo.PSObject.Properties.Name -contains 'ArgumentList') {
+    foreach ($argument in $qemuArgs) { $startInfo.ArgumentList.Add([string]$argument) }
+} else {
+    $startInfo.Arguments = (($qemuArgs | ForEach-Object { Quote-Argument ([string]$_) }) -join ' ')
+}
 $qemuProcess = [System.Diagnostics.Process]::Start($startInfo)
 if (-not $qemuProcess) { Fail 'QEMU did not start.' }
 
@@ -135,8 +164,8 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail 'the payload could not be uploaded.' }
 
     Write-Step "installing (this takes a while under TCG)"
-    & python $driver --port $SerialPort --command "rm -rf /root/oi-rootfs /root/scripts && tar -xzf /root/oi-payload.tar.gz -C /root && mv /root/rootfs /root/oi-rootfs && cp /root/scripts/install-base.sh /root/ && sh /root/install-base.sh $Mirror $Branch > /root/install.log 2>&1; echo INSTALL-EXIT=`$?" --output-seconds 3600 |
-        Tee-Object -FilePath (Join-Path $OutDir 'install.log') | Out-Null
+    $installCommand = "rm -rf /root/oi-rootfs /root/scripts && tar -xzf /root/oi-payload.tar.gz -C /root && mv /root/rootfs /root/oi-rootfs && cp /root/scripts/install-base.sh /root/ && sh /root/install-base.sh $Mirror $Branch > /root/install.log 2>&1; echo INSTALL-EXIT=`$?"
+    & python $driver --port $SerialPort --command $installCommand --output-seconds 3600 | Tee-Object -FilePath (Join-Path $OutDir 'install.log') | Out-Null
 
     $installLog = Get-Content (Join-Path $OutDir 'install.log') -Raw
     if ($installLog -notmatch 'OI-INSTALL-OK') {
@@ -146,11 +175,15 @@ try {
     Write-Step "shutting the live medium down"
     & python $driver --port $SerialPort --command 'poweroff -f' --output-seconds 20 | Out-Null
 } finally {
-    if ($qemuProcess -and -not $qemuProcess.HasExited) {
-        try { $qemuProcess.Kill($true) } catch { }
-        $qemuProcess.WaitForExit(15000) | Out-Null
+    if ($qemuProcess) {
+        try {
+            if (-not $qemuProcess.HasExited) {
+                $qemuProcess.Kill($true)
+                $qemuProcess.WaitForExit(15000) | Out-Null
+            }
+        } catch { }
+        $qemuProcess.Dispose()
     }
-    $qemuProcess.Dispose()
 }
 
 Write-Step "publishing the base image"
